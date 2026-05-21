@@ -2,12 +2,12 @@ package com.aiwebscraper.service;
 
 import com.aiwebscraper.model.CuratedItem;
 import com.aiwebscraper.model.NewsItem;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
 import java.util.Comparator;
 import java.util.List;
