@@ -9,9 +9,14 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class AiCurationService {
@@ -24,10 +29,12 @@ public class AiCurationService {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
+    private final NewsCacheService cacheService;
 
-    public AiCurationService(ChatClient.Builder builder, ObjectMapper objectMapper) {
+    public AiCurationService(ChatClient.Builder builder, ObjectMapper objectMapper, NewsCacheService cacheService) {
         this.chatClient = builder.defaultSystem(SYSTEM_PROMPT).build();
         this.objectMapper = objectMapper;
+        this.cacheService = cacheService;
     }
 
     public List<CuratedItem> curate(List<NewsItem> items) {
@@ -36,22 +43,52 @@ public class AiCurationService {
             return List.of();
         }
 
-        try {
-            String prompt = buildPrompt(items);
-            log.info("Sending {} items to Claude for curation...", items.size());
+        Map<String, Instant> urlToPublishedAt = items.stream()
+            .collect(Collectors.toMap(NewsItem::url, NewsItem::publishedAt, (a, b) -> a));
 
-            List<CuratedItem> curated = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(new ParameterizedTypeReference<>() {});
+        List<CuratedItem> cachedItems = new ArrayList<>();
+        List<NewsItem> newItems = new ArrayList<>();
 
-            log.info("Claude selected {} items", curated != null ? curated.size() : 0);
-            return curated != null ? curated : fallback(items);
-
-        } catch (Exception e) {
-            log.error("Claude curation failed: {} — falling back to recency sort", e.getMessage());
-            return fallback(items);
+        for (NewsItem item : items) {
+            Optional<CuratedItem> cached = cacheService.get(item.url());
+            if (cached.isPresent()) {
+                cachedItems.add(cached.get());
+            } else {
+                newItems.add(item);
+            }
         }
+
+        log.info("Cache: {} hits, {} misses — sending {} new items to Claude",
+            cachedItems.size(), newItems.size(), newItems.size());
+
+        List<CuratedItem> newCurated = List.of();
+        if (!newItems.isEmpty()) {
+            try {
+                String prompt = buildPrompt(newItems);
+                newCurated = chatClient.prompt()
+                    .user(prompt)
+                    .call()
+                    .entity(new ParameterizedTypeReference<>() {});
+                if (newCurated == null) {
+                    newCurated = List.of();
+                }
+                log.info("Claude summarized {} new items", newCurated.size());
+                cacheService.putAll(newCurated);
+            } catch (Exception e) {
+                log.error("Claude curation failed: {} — using cache only + recency fallback", e.getMessage());
+                newCurated = newItems.stream()
+                    .map(i -> new CuratedItem(i.title(), i.url(), i.source(), i.rawSummary(), "Recent AI News"))
+                    .toList();
+            }
+        }
+
+        return Stream.concat(cachedItems.stream(), newCurated.stream())
+            .sorted(Comparator.comparing(
+                item -> urlToPublishedAt.getOrDefault(item.url(), Instant.EPOCH),
+                Comparator.reverseOrder()
+            ))
+            .limit(15)
+            .toList();
     }
 
     private String buildPrompt(List<NewsItem> items) throws Exception {
@@ -66,23 +103,14 @@ public class AiCurationService {
 
         String json = objectMapper.writeValueAsString(simplified);
         return """
-            From the following news items, select the top 15 most significant AI stories. \
-            Prioritise: major model releases, research breakthroughs, industry shifts, policy changes. \
-            Return a JSON array only — no markdown. Each object must have exactly these fields: \
-            "title", "url", "source", "aiSummary" (2 sentences explaining the significance), \
-            "significance" (3-5 word label like "Major Model Release").
+            Summarize ALL of the following news items about AI. For EACH item, return an object with \
+            these exact fields: "title", "url", "source", \
+            "aiSummary" (2 sentences explaining why it matters), \
+            "significance" (3-5 word label like "Major Model Release"). \
+            Return a JSON array only — no markdown. Include every item provided.
 
             Items:
             """ + json;
-    }
-
-    private List<CuratedItem> fallback(List<NewsItem> items) {
-        return items.stream()
-            .sorted(Comparator.comparing(NewsItem::publishedAt).reversed())
-            .limit(15)
-            .map(i -> new CuratedItem(i.title(), i.url(), i.source(),
-                i.rawSummary(), "Recent AI News"))
-            .toList();
     }
 
     private String truncate(String text, int max) {
