@@ -4,11 +4,9 @@ import com.aiwebscraper.model.CuratedItem;
 import com.aiwebscraper.model.NewsItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.Comparator;
@@ -19,54 +17,36 @@ import java.util.Map;
 public class AiCurationService {
 
     private static final Logger log = LoggerFactory.getLogger(AiCurationService.class);
-    private static final String ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String MODEL = "claude-haiku-4-5-20251001";
     private static final String SYSTEM_PROMPT = """
         You are an expert AI news editor. When given a list of raw news items, you select the most \
         significant stories about artificial intelligence, machine learning, large language models, \
         and related technologies. You always respond with valid JSON only — no markdown, no explanation.""";
 
-    private final RestClient restClient;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
-    private final String apiKey;
 
-    public AiCurationService(RestClient.Builder builder, ObjectMapper objectMapper,
-                              @Value("${ANTHROPIC_API_KEY:}") String apiKey) {
-        this.restClient = builder.build();
+    public AiCurationService(ChatClient.Builder builder, ObjectMapper objectMapper) {
+        this.chatClient = builder.defaultSystem(SYSTEM_PROMPT).build();
         this.objectMapper = objectMapper;
-        this.apiKey = apiKey;
     }
 
     public List<CuratedItem> curate(List<NewsItem> items) {
-        if (apiKey.isBlank()) {
-            log.warn("ANTHROPIC_API_KEY not set — falling back to recency sort, no AI summaries");
-            return fallback(items);
-        }
         if (items.isEmpty()) {
             log.info("No items to curate");
             return List.of();
         }
 
         try {
-            String userMessage = buildPrompt(items);
-            String requestBody = buildRequestBody(userMessage);
-
+            String prompt = buildPrompt(items);
             log.info("Sending {} items to Claude for curation...", items.size());
 
-            String raw = restClient.post()
-                .uri(ANTHROPIC_API_URL)
-                .contentType(MediaType.APPLICATION_JSON)
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", "2023-06-01")
-                .body(requestBody)
-                .retrieve()
-                .body(String.class);
+            List<CuratedItem> curated = chatClient.prompt()
+                .user(prompt)
+                .call()
+                .entity(new ParameterizedTypeReference<>() {});
 
-            JsonNode response = objectMapper.readTree(raw);
-            String text = response.path("content").get(0).path("text").asText();
-            List<CuratedItem> curated = parseCuratedItems(text);
-            log.info("Claude selected {} items", curated.size());
-            return curated;
+            log.info("Claude selected {} items", curated != null ? curated.size() : 0);
+            return curated != null ? curated : fallback(items);
 
         } catch (Exception e) {
             log.error("Claude curation failed: {} — falling back to recency sort", e.getMessage());
@@ -94,19 +74,6 @@ public class AiCurationService {
 
             Items:
             """ + json;
-    }
-
-    private String buildRequestBody(String userMessage) throws Exception {
-        return objectMapper.writeValueAsString(Map.of(
-            "model", MODEL,
-            "max_tokens", 4096,
-            "system", SYSTEM_PROMPT,
-            "messages", List.of(Map.of("role", "user", "content", userMessage))
-        ));
-    }
-
-    private List<CuratedItem> parseCuratedItems(String json) throws Exception {
-        return objectMapper.readerForListOf(CuratedItem.class).readValue(json);
     }
 
     private List<CuratedItem> fallback(List<NewsItem> items) {
