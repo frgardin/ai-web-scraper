@@ -6,3 +6,8 @@ services:
       - "8025:8025"   # Web UI — open http://localhost:8025 to view emails
     environment:
       MP_MAX_MESSAGES: 500
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports:
+      - "6379:6379"
