@@ -10,7 +10,8 @@ public record AppProperties(
     @DefaultValue Email email,
     @DefaultValue News news,
     @DefaultValue("true") boolean runOnStartup,
-    @DefaultValue Schedule schedule
+    @DefaultValue Schedule schedule,
+    @DefaultValue Cache cache
 ) {
     public record Email(
         @DefaultValue List<String> recipients,
@@ -25,5 +26,9 @@ public record AppProperties(
 
     public record Schedule(
         @DefaultValue("0 0 8 * * *") String cron
+    ) {}
+
+    public record Cache(
+        @DefaultValue("72") int ttlHours
     ) {}
 }
