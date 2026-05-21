@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "AI Web Scraper",
+            "request": "launch",
+            "mainClass": "com.aiwebscraper.AiWebScraperApplication",
+            "projectName": "ai-web-scraper",
+            "envFile": "${workspaceFolder}/.env",
+        }
+    ]
+}

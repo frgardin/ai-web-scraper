@@ -4,6 +4,7 @@ import com.aiwebscraper.config.AppProperties;
 import com.aiwebscraper.model.CuratedItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +21,9 @@ public class NewsCacheService {
     private final RedisTemplate<String, CuratedItem> redisTemplate;
     private final Duration ttl;
 
-    public NewsCacheService(RedisTemplate<String, CuratedItem> redisTemplate, AppProperties appProperties) {
+    public NewsCacheService(
+            @Qualifier("curatedItemRedisTemplate") RedisTemplate<String, CuratedItem> redisTemplate,
+            AppProperties appProperties) {
         this.redisTemplate = redisTemplate;
         this.ttl = Duration.ofHours(appProperties.cache().ttlHours());
     }
@@ -38,7 +41,7 @@ public class NewsCacheService {
         try {
             redisTemplate.opsForValue().set(KEY_PREFIX + url, item, ttl);
         } catch (Exception e) {
-            log.warn("Cache write failed for url={}: {}", url, e.getMessage());
+            log.error("Cache write failed for url={}: {}", url, e.getMessage(), e);
         }
     }
 

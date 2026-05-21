@@ -1,5 +1,6 @@
 package com.aiwebscraper.service;
 
+import com.aiwebscraper.config.AppProperties;
 import com.aiwebscraper.model.NewsItem;
 import com.aiwebscraper.scraper.NewsScraper;
 import org.slf4j.Logger;
@@ -17,9 +18,11 @@ public class NewsAggregatorService {
     private static final Logger log = LoggerFactory.getLogger(NewsAggregatorService.class);
 
     private final List<NewsScraper> scrapers;
+    private final int maxItems;
 
-    public NewsAggregatorService(List<NewsScraper> scrapers) {
+    public NewsAggregatorService(List<NewsScraper> scrapers, AppProperties appProperties) {
         this.scrapers = scrapers;
+        this.maxItems = appProperties.news().maxItems();
     }
 
     public List<NewsItem> aggregateAllNews() {
@@ -44,7 +47,9 @@ public class NewsAggregatorService {
             }
         }
 
-        log.info("Aggregated {} unique items across all sources", seen.size());
-        return new ArrayList<>(seen.values());
+        List<NewsItem> result = new ArrayList<>(seen.values());
+        if (result.size() > maxItems) result = result.subList(0, maxItems);
+        log.info("Aggregated {} unique items across all sources", result.size());
+        return result;
     }
 }

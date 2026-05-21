@@ -5,8 +5,8 @@ import com.aiwebscraper.model.NewsItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -65,13 +65,10 @@ public class AiCurationService {
         if (!newItems.isEmpty()) {
             try {
                 String prompt = buildPrompt(newItems);
-                newCurated = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .entity(new ParameterizedTypeReference<>() {});
-                if (newCurated == null) {
-                    newCurated = List.of();
-                }
+                String raw = chatClient.prompt().user(prompt).call().content();
+                String cleanJson = stripMarkdownFences(raw);
+                newCurated = objectMapper.readValue(cleanJson, new TypeReference<>() {});
+                if (newCurated == null) newCurated = List.of();
                 log.info("Claude summarized {} new items", newCurated.size());
                 cacheService.putAll(newCurated);
             } catch (Exception e) {
@@ -111,6 +108,15 @@ public class AiCurationService {
 
             Items:
             """ + json;
+    }
+
+    private String stripMarkdownFences(String text) {
+        String s = text == null ? "" : text.strip();
+        if (s.startsWith("```")) {
+            s = s.replaceFirst("^```(?:json)?\\s*\n?", "");
+            s = s.replaceFirst("\\s*```\\s*$", "");
+        }
+        return s.strip();
     }
 
     private String truncate(String text, int max) {
